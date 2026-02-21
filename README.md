@@ -1,6 +1,6 @@
 # nanocode_openai_compat
 
-一个支持工具调用的 OpenAI 兼容 API Agent，参考了 [nanocode](https://github.com/anthropics/building-ai-agents/blob/main/nanocode.py)。
+一个支持工具调用的 OpenAI 兼容 API Agent，参考了 [nanocode](https://github.com/1rgs/nanocode)。
 
 ## 简介
 
