@@ -128,25 +128,8 @@ uv run agent.py
 - **`build_openai_tools()`**：将内部工具格式转换为 OpenAI 函数格式
 - **`execute_tool()`**：分发工具调用到实际实现
 
-## 参考
-
-本项目参考以下项目：
-
-- **[nanocode](https://github.com/anthropics/building-ai-agents/blob/main/nanocode.py)** - Anthropic 开发的 270 行极简 Claude Code 替代方案
-- **[Claude Code](https://github.com/anthropics/claude-code)** - Anthropic 的全功能 Agent
-
-双重循环 Agent 架构和工具定义遵循 nanocode 中的模式，适配为 OpenAI 兼容 API。
-
 ## 环境要求
 
 - Python 3.10+
 - `openai` 库
 - `python-dotenv`（可选，用于 `.env` 文件支持）
-
-## 许可证
-
-MIT 许可证（与 nanocode 相同）
-
-## 贡献
-
-本项目为演示项目。欢迎 fork 并扩展更多工具或功能。
