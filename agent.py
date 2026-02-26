@@ -17,23 +17,41 @@ OpenAI兼容API工具调用Agent演示
 
 import json
 import os
+import sys
 from typing import Callable
 from openai import OpenAI
+
+try:
+    from colorama import init, Fore, Style
+
+    init(autoreset=True)
+    _COLOR = True
+except ImportError:
+    _COLOR = False
+
+    class Fore:
+        CYAN = GREEN = YELLOW = RED = MAGENTA = BLUE = ""
+
+    class Style:
+        BRIGHT = RESET_ALL = ""
+
 
 # 尝试加载 .env 文件
 _DOTENV_LOADED = False
 try:
     from dotenv import load_dotenv
+
     _DOTENV_LOADED = load_dotenv()  # 自动加载当前目录下的 .env 文件
 except ImportError:
     pass  # 如果没有安装 python-dotenv，则跳过
 
 # ==================== 工具函数实现 ====================
 
+
 def read(path: str, offset: int = None, limit: int = None) -> str:
     """读取文件内容，带行号"""
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             lines = f.readlines()
 
         if offset is not None:
@@ -47,23 +65,25 @@ def read(path: str, offset: int = None, limit: int = None) -> str:
         result = []
         for i, line in enumerate(lines, line_num_start):
             result.append(f"{i:4d} | {line.rstrip()}")
-        return '\n'.join(result) if result else "(空文件)"
+        return "\n".join(result) if result else "(空文件)"
     except Exception as e:
         return f"错误: {e}"
+
 
 def write(path: str, content: str) -> str:
     """写入文件"""
     try:
-        with open(path, 'w', encoding='utf-8') as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(content)
         return f"成功写入文件: {path}"
     except Exception as e:
         return f"错误: {e}"
 
+
 def edit(path: str, old: str, new: str, all: bool = False) -> str:
     """替换文件内容"""
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             content = f.read()
 
         if all:
@@ -75,16 +95,18 @@ def edit(path: str, old: str, new: str, all: bool = False) -> str:
             new_content = content.replace(old, new, 1)
             count = 1 if old in content else 0
 
-        with open(path, 'w', encoding='utf-8') as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(new_content)
 
         return f"成功替换 {count} 处内容" if count > 0 else "未找到匹配内容"
     except Exception as e:
         return f"错误: {e}"
 
+
 def glob(pat: str, path: str = ".") -> str:
     """查找匹配文件"""
     import fnmatch
+
     try:
         matches = []
         for root, dirs, files in os.walk(path):
@@ -95,28 +117,35 @@ def glob(pat: str, path: str = ".") -> str:
                     matches.append((full_path, mtime))
 
         matches.sort(key=lambda x: x[1], reverse=True)
-        return '\n'.join([f"{p} | {m}" for p, m in matches]) if matches else "未找到匹配文件"
+        return (
+            "\n".join([f"{p} | {m}" for p, m in matches])
+            if matches
+            else "未找到匹配文件"
+        )
     except Exception as e:
         return f"错误: {e}"
+
 
 def grep(pat: str, path: str = ".") -> str:
     """搜索文件内容"""
     import re
+
     try:
         results = []
         for root, dirs, files in os.walk(path):
             for filename in files:
                 filepath = os.path.join(root, filename)
                 try:
-                    with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                         for i, line in enumerate(f, 1):
                             if re.search(pat, line):
                                 results.append(f"{filepath}:{i}: {line.rstrip()}")
                 except:
                     continue
-        return '\n'.join(results[:50]) if results else "未找到匹配"  # 限制返回数量
+        return "\n".join(results[:50]) if results else "未找到匹配"  # 限制返回数量
     except Exception as e:
         return f"错误: {e}"
+
 
 def _decode_bytes(data: bytes) -> str:
     """解码字节，尝试多种编码（Windows GBK/UTF-8）"""
@@ -124,27 +153,24 @@ def _decode_bytes(data: bytes) -> str:
         return ""
     # 尝试 UTF-8
     try:
-        return data.decode('utf-8')
+        return data.decode("utf-8")
     except UnicodeDecodeError:
         pass
     # 尝试 GBK (Windows 中文)
     try:
-        return data.decode('gbk')
+        return data.decode("gbk")
     except UnicodeDecodeError:
         pass
     # 回退：替换错误字符
-    return data.decode('utf-8', errors='replace')
+    return data.decode("utf-8", errors="replace")
+
 
 def bash(cmd: str) -> str:
     """执行shell命令"""
     import subprocess
+
     try:
-        result = subprocess.run(
-            cmd,
-            shell=True,
-            capture_output=True,
-            timeout=60
-        )
+        result = subprocess.run(cmd, shell=True, capture_output=True, timeout=60)
         # 解码输出，处理 Windows 中文编码
         stdout = _decode_bytes(result.stdout)
         stderr = _decode_bytes(result.stderr)
@@ -159,6 +185,7 @@ def bash(cmd: str) -> str:
         return "错误: 命令超时(60秒)"
     except Exception as e:
         return f"错误: {e}"
+
 
 # ==================== 工具定义 ====================
 
@@ -195,6 +222,7 @@ TOOLS: dict[str, tuple[str, dict, Callable]] = {
     ),
 }
 
+
 def build_openai_tools() -> list[dict]:
     """将工具定义转换为OpenAI格式"""
     openai_tools = []
@@ -215,19 +243,22 @@ def build_openai_tools() -> list[dict]:
             elif param_type == "boolean":
                 properties[param_name] = {"type": "boolean"}
 
-        openai_tools.append({
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": description,
-                "parameters": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": required
-                }
+        openai_tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
+                },
             }
-        })
+        )
     return openai_tools
+
 
 def execute_tool(name: str, arguments: dict) -> str:
     """执行工具调用"""
@@ -240,7 +271,9 @@ def execute_tool(name: str, arguments: dict) -> str:
     except Exception as e:
         return f"工具执行错误: {e}"
 
+
 # ==================== Agent核心 ====================
+
 
 class ToolAgent:
     def __init__(self, base_url: str = None, api_key: str = None, model: str = None):
@@ -251,14 +284,13 @@ class ToolAgent:
         model: 模型名称
         """
         # 从环境变量获取配置
-        self.base_url = base_url or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+        self.base_url = base_url or os.getenv(
+            "OPENAI_BASE_URL", "https://api.openai.com/v1"
+        )
         self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-        self.client = OpenAI(
-            base_url=self.base_url,
-            api_key=self.api_key
-        )
+        self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
         self.tools = build_openai_tools()
         self.messages = []
 
@@ -287,9 +319,10 @@ class ToolAgent:
             # 调用API
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "system", "content": self.system_prompt}] + self.messages,
+                messages=[{"role": "system", "content": self.system_prompt}]
+                + self.messages,
                 tools=self.tools,
-                tool_choice="auto"
+                tool_choice="auto",
             )
 
             message = response.choices[0].message
@@ -297,30 +330,30 @@ class ToolAgent:
             # 检查是否有工具调用
             if not message.tool_calls:
                 # 没有工具调用，直接返回内容
-                self.messages.append({
-                    "role": "assistant",
-                    "content": message.content
-                })
+                self.messages.append({"role": "assistant", "content": message.content})
                 return message.content
 
             # 有工具调用，执行工具
-            print(f"\n[工具调用第 {iteration + 1} 轮]")
+            print(f"\n{Fore.YELLOW}[工具调用第 {iteration + 1} 轮]{Style.RESET_ALL}")
 
             # 添加assistant的tool_calls消息
-            self.messages.append({
-                "role": "assistant",
-                "content": message.content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
+            self.messages.append(
+                {
+                    "role": "assistant",
+                    "content": message.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
                         }
-                    } for tc in message.tool_calls
-                ]
-            })
+                        for tc in message.tool_calls
+                    ],
+                }
+            )
 
             # 执行每个工具调用
             for tool_call in message.tool_calls:
@@ -330,21 +363,21 @@ class ToolAgent:
                 except json.JSONDecodeError:
                     tool_args = {}
 
-                print(f"  🔧 {tool_name}({json.dumps(tool_args, ensure_ascii=False)})")
+                print(
+                    f"  {Fore.MAGENTA}🔧 {tool_name}{Style.RESET_ALL}({json.dumps(tool_args, ensure_ascii=False)})"
+                )
 
                 # 执行工具
                 result = execute_tool(tool_name, tool_args)
 
                 # 截断过长的结果
                 display_result = result[:500] + "..." if len(result) > 500 else result
-                print(f"  📤 结果: {display_result}")
+                print(f"  {Fore.BLUE}📤 结果: {Style.RESET_ALL}{display_result}")
 
                 # 添加工具结果到消息
-                self.messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": result
-                })
+                self.messages.append(
+                    {"role": "tool", "tool_call_id": tool_call.id, "content": result}
+                )
 
             # 继续循环，让模型处理工具结果
 
@@ -355,7 +388,9 @@ class ToolAgent:
         self.messages = []
         print("对话历史已清空")
 
+
 # ==================== 主程序 ====================
+
 
 def main():
     print("=" * 50)
@@ -366,9 +401,9 @@ def main():
     print("  OPENAI_API_KEY  - API密钥")
     print("  OPENAI_MODEL    - 模型名称 (默认: gpt-4o-mini)")
     print("\n.env 文件示例:")
-    print('  OPENAI_BASE_URL=https://api.openai.com/v1')
-    print('  OPENAI_API_KEY=sk-xxx')
-    print('  OPENAI_MODEL=gpt-4o-mini')
+    print("  OPENAI_BASE_URL=https://api.openai.com/v1")
+    print("  OPENAI_API_KEY=sk-xxx")
+    print("  OPENAI_MODEL=gpt-4o-mini")
     print("\n命令:")
     print("  /clear - 清空对话历史")
     print("  /quit  - 退出")
@@ -388,6 +423,7 @@ def main():
         # 检查是否有 python-dotenv
         try:
             import dotenv  # noqa: F401
+
             print(f"   .env: 未找到文件或文件为空")
         except ImportError:
             print(f"   .env: 未安装 python-dotenv (pip install python-dotenv)")
@@ -396,20 +432,20 @@ def main():
     while True:
         try:
             print()
-            user_input = input("👤 用户: ").strip()
+            user_input = input(f"{Fore.CYAN}👤 用户: {Style.RESET_ALL}").strip()
 
             if not user_input:
                 continue
 
-            if user_input.lower() in ['/quit', '/exit', 'quit', 'exit']:
+            if user_input.lower() in ["/quit", "/exit", "quit", "exit"]:
                 print("👋 再见!")
                 break
 
-            if user_input.lower() == '/clear':
+            if user_input.lower() == "/clear":
                 agent.clear_history()
                 continue
 
-            if user_input.lower() == '/tools':
+            if user_input.lower() == "/tools":
                 print("\n可用工具:")
                 for name, (desc, params, _) in TOOLS.items():
                     print(f"  - {name}: {desc}")
@@ -419,13 +455,14 @@ def main():
             # 内循环：工具调用（在agent.chat内部处理）
             print()
             response = agent.chat(user_input)
-            print(f"\n🤖 Agent: {response}")
+            print(f"\n{Fore.GREEN}🤖 Agent: {response}{Style.RESET_ALL}")
 
         except KeyboardInterrupt:
             print("\n👋 再见!")
             break
         except Exception as e:
             print(f"\n❌ 错误: {e}")
+
 
 if __name__ == "__main__":
     main()
