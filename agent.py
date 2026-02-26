@@ -521,6 +521,9 @@ class ToolAgent:
                     {"role": "tool", "tool_call_id": tool_call.id, "content": result}
                 )
 
+            # 工具调用结束提示
+            print(f"\n{Fore.YELLOW}[工具调用第 {iteration + 1} 轮结束]{Style.RESET_ALL}\n")
+
             # 重置累积内容，准备下一轮
             accumulated_content = ""
 
