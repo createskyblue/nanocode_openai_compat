@@ -305,15 +305,17 @@ class ToolAgent:
 
 请根据用户需求选择合适工具。如果需要多个步骤，请逐步执行。"""
 
-    def chat(self, user_input: str) -> str:
+    def chat(self, user_input: str, stream: bool = False) -> str:
         """
         处理用户输入，支持多轮工具调用
+        stream: 是否使用流式输出
         返回最终回复
         """
         # 添加用户消息
         self.messages.append({"role": "user", "content": user_input})
 
         max_iterations = 10  # 防止无限循环
+        accumulated_content = ""  # 累积内容用于流式输出
 
         for iteration in range(max_iterations):
             # 调用API
@@ -323,15 +325,74 @@ class ToolAgent:
                 + self.messages,
                 tools=self.tools,
                 tool_choice="auto",
+                stream=stream,
             )
 
-            message = response.choices[0].message
+            if stream:
+                # 流式输出处理
+                tool_calls = []  # 收集流式响应中的工具调用
 
-            # 检查是否有工具调用
-            if not message.tool_calls:
-                # 没有工具调用，直接返回内容
-                self.messages.append({"role": "assistant", "content": message.content})
-                return message.content
+                for chunk in response:
+                    delta = chunk.choices[0].delta
+
+                    # 处理内容流式输出
+                    if delta.content:
+                        content_part = delta.content
+                        accumulated_content += content_part
+                        print(content_part, end="", flush=True)
+
+                    # 收集工具调用信息（流式响应中可能分多次返回）
+                    if delta.tool_calls:
+                        for tc in delta.tool_calls:
+                            # 找到或创建对应的工具调用
+                            if tc.index is not None:
+                                while len(tool_calls) <= tc.index:
+                                    tool_calls.append({"id": "", "function": {"name": "", "arguments": ""}})
+                                if tc.id:
+                                    tool_calls[tc.index]["id"] = tc.id
+                                if tc.function and tc.function.name:
+                                    tool_calls[tc.index]["function"]["name"] += tc.function.name
+                                if tc.function and tc.function.arguments:
+                                    tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+
+                print()  # 换行
+
+                # 转换为标准工具调用格式
+                if tool_calls:
+                    message_tool_calls = []
+                    for tc in tool_calls:
+                        if tc["function"]["name"]:  # 只添加有效的工具调用
+                            message_tool_calls.append(
+                                type('obj', (object,), {
+                                    "id": tc["id"],
+                                    "function": type('obj', (object,), {
+                                        "name": tc["function"]["name"],
+                                        "arguments": tc["function"]["arguments"]
+                                    })()
+                                })()
+                            )
+                else:
+                    message_tool_calls = []
+
+                # 检查是否有工具调用
+                if not message_tool_calls:
+                    # 没有工具调用，保存内容并返回
+                    self.messages.append({"role": "assistant", "content": accumulated_content})
+                    return accumulated_content
+
+                message_content = accumulated_content
+
+            else:
+                # 非流式输出处理
+                message = response.choices[0].message
+                message_tool_calls = message.tool_calls
+                message_content = message.content
+
+                # 检查是否有工具调用
+                if not message_tool_calls:
+                    # 没有工具调用，直接返回内容
+                    self.messages.append({"role": "assistant", "content": message_content})
+                    return message_content
 
             # 有工具调用，执行工具
             print(f"\n{Fore.YELLOW}[工具调用第 {iteration + 1} 轮]{Style.RESET_ALL}")
@@ -340,7 +401,7 @@ class ToolAgent:
             self.messages.append(
                 {
                     "role": "assistant",
-                    "content": message.content,
+                    "content": message_content,
                     "tool_calls": [
                         {
                             "id": tc.id,
@@ -350,13 +411,13 @@ class ToolAgent:
                                 "arguments": tc.function.arguments,
                             },
                         }
-                        for tc in message.tool_calls
+                        for tc in message_tool_calls
                     ],
                 }
             )
 
             # 执行每个工具调用
-            for tool_call in message.tool_calls:
+            for tool_call in message_tool_calls:
                 tool_name = tool_call.function.name
                 try:
                     tool_args = json.loads(tool_call.function.arguments)
@@ -378,6 +439,9 @@ class ToolAgent:
                 self.messages.append(
                     {"role": "tool", "tool_call_id": tool_call.id, "content": result}
                 )
+
+            # 重置累积内容，准备下一轮
+            accumulated_content = ""
 
             # 继续循环，让模型处理工具结果
 
@@ -405,16 +469,19 @@ def main():
     print("  OPENAI_API_KEY=sk-xxx")
     print("  OPENAI_MODEL=gpt-4o-mini")
     print("\n命令:")
-    print("  /clear - 清空对话历史")
-    print("  /quit  - 退出")
-    print("  /tools - 显示可用工具")
+    print("  /clear    - 清空对话历史")
+    print("  /stream   - 切换流式输出模式")
+    print("  /quit     - 退出")
+    print("  /tools    - 显示可用工具")
     print("=" * 50)
 
     # 初始化Agent
     agent = ToolAgent()
+    stream_mode = True  # 默认流式输出
     print(f"\n✅ Agent已初始化")
     print(f"   模型: {agent.model}")
     print(f"   API: {agent.base_url}")
+    print(f"   流式: {stream_mode}")
 
     # 显示 .env 加载状态
     if _DOTENV_LOADED:
@@ -452,10 +519,20 @@ def main():
                     print(f"    参数: {params}")
                 continue
 
+            if user_input.lower() == "/stream":
+                stream_mode = not stream_mode
+                print(f"\n✅ 流式输出模式: {stream_mode}")
+                continue
+
             # 内循环：工具调用（在agent.chat内部处理）
             print()
-            response = agent.chat(user_input)
-            print(f"\n{Fore.GREEN}🤖 Agent: {response}{Style.RESET_ALL}")
+            if stream_mode:
+                print(f"{Fore.GREEN}🤖 Agent: {Style.RESET_ALL}", end="")
+                response = agent.chat(user_input, stream=True)
+                print()  # 流式输出后换行
+            else:
+                response = agent.chat(user_input)
+                print(f"{Fore.GREEN}🤖 Agent: {response}{Style.RESET_ALL}")
 
         except KeyboardInterrupt:
             print("\n👋 再见!")
