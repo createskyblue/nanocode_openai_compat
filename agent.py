@@ -274,22 +274,25 @@ def execute_tool(name: str, arguments: dict) -> str:
 
 # ==================== Agent核心 ====================
 
-def load_file_content(filepath: str, max_lines: int | None = None) -> str:
-    """加载文件内容，支持限制行数"""
+def load_file_content(filepath: str, max_lines: int | None = None) -> tuple[str, int]:
+    """
+    加载文件内容，支持限制行数
+    返回: (内容, 总行数)
+    """
     try:
         with open(filepath, "r", encoding="utf-8") as f:
-            if max_lines:
-                lines = [f.readline() for _ in range(max_lines)]
+            all_lines = f.readlines()
+            total_lines = len(all_lines)
+
+            if max_lines and total_lines > max_lines:
+                lines = all_lines[:max_lines]
                 content = "".join(lines)
-                # 检查是否还有更多内容
-                if f.read(1):  # 尝试读取一个字符
-                    return content + f"\n\n[文件还有更多内容，如需查看更多请使用read工具读取完整文件]"
-                return content
-            return f.read()
+                return content, total_lines
+            return "".join(all_lines), total_lines
     except FileNotFoundError:
-        return ""
+        return "", 0
     except Exception as e:
-        return f"(加载文件失败: {e})"
+        return f"(加载文件失败: {e})", 0
 
 
 class ToolAgent:
@@ -314,15 +317,20 @@ class ToolAgent:
         # 获取脚本所在目录（用于加载上下文文件）
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
 
+        # 初始化上下文相关属性
+        self.agent_content = ""
+        self.memory_content = ""
+        self.memory_total_lines = 0
+
     def _load_context_files(self):
         """加载目录下的 AGENT.md 和 MEMORY.md 文件（每轮对话重新加载）"""
         # 加载 AGENT.md (完整内容)
         agent_path = os.path.join(self.script_dir, "AGENT.md")
-        self.agent_content = load_file_content(agent_path)
+        self.agent_content, _ = load_file_content(agent_path)
 
         # 加载 MEMORY.md (只加载前200行)
         memory_path = os.path.join(self.script_dir, "MEMORY.md")
-        self.memory_content = load_file_content(memory_path, max_lines=200)
+        self.memory_content, self.memory_total_lines = load_file_content(memory_path, max_lines=200)
 
     def _build_system_prompt(self):
         """构建系统提示词"""
@@ -330,35 +338,32 @@ class ToolAgent:
         self._load_context_files()
 
         # 基础指令
-        base_instructions = """你是一个有用的AI助手，可以使用以下工具帮助用户:
-- read: 读取文件内容
-- write: 写入文件
-- edit: 编辑文件内容
-- glob: 查找文件
-- grep: 搜索文件内容
-- bash:请根据用户需求 执行shell命令
-
-选择合适工具。如果需要多个步骤，请逐步执行。"""
+        base_instructions = """你是一个有用的AI助手，可以使用以工具帮助用户，选择合适工具。如果需要多个步骤，请逐步执行。当用户说出关键信息时，你可以压缩为一段没有表情符号的50字概要使用替换工具插入MEMORY文件"""
 
         # Project Context 部分
         project_context_parts = []
 
         # 添加 MEMORY 内容（如果有）
         if self.memory_content:
+            loaded_lines = min(200, self.memory_total_lines)
             project_context_parts.append(f"""## MEMORY (项目记忆文件)
-你可以通过工具自由读取、写入、编辑 MEMORY.md 文件。
-**注意**: 系统默认只将 MEMORY.md 的前200行加载到上下文中。如果需要查看或编辑更多内容，请使用 read 工具自行读取完整文件。
+文件总行数: {self.memory_total_lines} 行
+已加载: 前 {loaded_lines} 行 (系统限制最大200行)
 
----MEMORY内容开始---
+你可以通过工具自由读取、写入、编辑 MEMORY.md 文件。
+如需查看或编辑更多内容，请使用 read 工具自行读取完整文件。
+
+<memory>
 {self.memory_content}
----MEMORY内容结束---""")
+</memory>""")
 
         # 添加 AGENT 内容（如果有）
         if self.agent_content:
             project_context_parts.append(f"""## AGENT (智能体配置)
----AGENT内容开始---
+
+<agent>
 {self.agent_content}
----AGENT内容结束---""")
+</agent>""")
 
         # 组装完整的系统提示
         if project_context_parts:
